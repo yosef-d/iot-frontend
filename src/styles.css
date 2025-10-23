@@ -1,0 +1,9 @@
+﻿:root { font-family: system-ui, Arial, sans-serif; }
+.container { max-width: 1000px; margin: 32px auto; padding: 0 16px; }
+.actions { display:flex; gap:8px; margin-bottom:12px; }
+button { padding: 8px 12px; border: 1px solid #ccc; background:#fff; cursor:pointer; }
+button:disabled { opacity: .6; cursor: default; }
+table { width:100%; border-collapse: collapse; }
+th, td { border:1px solid #e5e5e5; padding:6px 8px; font-size:14px; }
+th { background:#f7f7f7; text-align:left; }
+.error { color:#b00; background:#fee; padding:8px; white-space:pre-wrap; }
