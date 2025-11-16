@@ -4,7 +4,7 @@ import L, { Map as LeafletMap, Layer, Polyline, Marker } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { getRecent, getTrack, listAvailableDays, type Reading } from "./api";
 
-// ---------------- helpers ----------------
+// === helpers ===
 function haversine(a: [number, number], b: [number, number]): number {
   const R = 6371000;
   const toRad = (x: number) => (x * Math.PI) / 180;
@@ -21,20 +21,20 @@ const fmtMeters = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `$
 const fmtMinutes = (mins: number) => `${mins.toFixed(0)} min`;
 const dayOf = (iso: string) => iso.slice(0, 10);
 
-// Deriva lista de días únicos (YYYY-MM-DD) desde lecturas
+// Deriva días únicos desde lecturas
 function daysFromRows(rows: Reading[]): string[] {
   const s = new Set<string>();
   for (const r of rows) if (r.read_at) s.add(dayOf(r.read_at));
-  return Array.from(s).sort((a, b) => (a < b ? 1 : -1)); // más reciente primero
+  return Array.from(s).sort((a, b) => (a < b ? 1 : -1));
 }
 
 export default function App() {
-  // ---------------- mapa ----------------
+  // mapa
   const mapRef = useRef<LeafletMap | null>(null);
   const routeLayerRef = useRef<Layer | null>(null);
   const markersRef = useRef<Marker[]>([]);
 
-  // ---------------- estado ----------------
+  // estado de datos
   const [rows, setRows] = useState<Reading[]>([]);
   const [availableDays, setAvailableDays] = useState<string[]>([]);
   const [selectedDay, setSelectedDay] = useState<string>("");
@@ -45,7 +45,10 @@ export default function App() {
   const [mins, setMins] = useState(0);
   const [pointsCount, setPointsCount] = useState(0);
 
-  // ---------------- init mapa ----------------
+  // UI: drawer (panel lateral con tabla)
+  const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
+
+  // init mapa
   useEffect(() => {
     if (mapRef.current) return;
     const map = L.map("map", { center: [19.4326, -99.1332], zoom: 12 });
@@ -53,18 +56,25 @@ export default function App() {
       attribution: "&copy; OpenStreetMap",
     }).addTo(map);
     mapRef.current = map;
+    setTimeout(() => map.invalidateSize(), 150);
   }, []);
 
-  // ---------------- carga inicial ----------------
+  // al abrir/cerrar el drawer, reajusta el mapa
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const t = setTimeout(() => map.invalidateSize(), 320);
+    return () => clearTimeout(t);
+  }, [drawerOpen]);
+
+  // carga inicial
   useEffect(() => {
     (async () => {
       setErrorMsg("");
       try {
-        // 1) lecturas recientes (para tabla y fallback de días)
         const recent = await getRecent(500);
         setRows(recent.items);
 
-        // 2) días disponibles del backend; si falla, derivamos de recent
         let days: string[] = [];
         try {
           days = await listAvailableDays(1000);
@@ -73,7 +83,6 @@ export default function App() {
         }
         setAvailableDays(days);
 
-        // 3) selecciona el día más reciente y dibuja
         const chosen = days[0] || "";
         setSelectedDay(chosen);
         if (chosen) await loadTrackForDay(chosen);
@@ -84,7 +93,7 @@ export default function App() {
     })();
   }, []);
 
-  // ---------------- capas: limpiar/dibujar ----------------
+  // utilidades de dibujo
   function clearRouteLayers() {
     const map = mapRef.current;
     if (!map) return;
@@ -112,7 +121,6 @@ export default function App() {
     poly.addTo(map);
     routeLayerRef.current = poly;
 
-    // marcadores inicio / fin
     const first = points[0];
     const last = points[points.length - 1];
     const mk1 = L.marker([first.lat, first.lon]).addTo(map);
@@ -124,7 +132,7 @@ export default function App() {
     for (let i = 1; i < latlngs.length; i++) d += haversine(latlngs[i - 1], latlngs[i]);
     setDist(d);
 
-    // duración por read_at
+    // duración (por read_at)
     let minutes = 0;
     if (first.read_at && last.read_at) {
       const t1 = new Date(first.read_at).getTime();
@@ -134,13 +142,13 @@ export default function App() {
     setMins(minutes);
 
     map.fitBounds(poly.getBounds(), { padding: [24, 24] });
+    setTimeout(() => map.invalidateSize(), 120);
   }
 
-  // ---------------- cargar ruta para un día (cliente) ----------------
+  // filtra por día en cliente
   async function loadTrackForDay(day: string) {
     setErrorMsg("");
     try {
-      // getTrack ya manda device desde api.ts; aquí pedimos todo y filtramos por día
       const { items } = await getTrack({ order: "asc" });
       const dayItems = items
         .filter((r) => r.read_at && dayOf(r.read_at) === day)
@@ -153,16 +161,13 @@ export default function App() {
     }
   }
 
-  // ---------------- handlers ----------------
+  // acciones UI
   async function onRefreshTable() {
     setErrorMsg("");
     try {
       const { items } = await getRecent(500);
       setRows(items);
-      if (!availableDays.length) {
-        const derived = daysFromRows(items);
-        setAvailableDays(derived);
-      }
+      if (!availableDays.length) setAvailableDays(daysFromRows(items));
     } catch (e: any) {
       console.error(e);
       setErrorMsg(String(e?.message ?? e));
@@ -175,7 +180,6 @@ export default function App() {
     else clearRouteLayers();
   }
 
-  // ---------------- UI ----------------
   return (
     <div className="app-shell">
       <div className="topbar">
@@ -184,18 +188,22 @@ export default function App() {
       </div>
 
       {errorMsg && (
-        <div style={{ background: "#fee", border: "1px solid #f99", padding: 8, margin: "8px 16px" }}>
+        <div className="error-banner">
           <strong>Error:</strong> {errorMsg}
         </div>
       )}
 
-      <div className="grid">
-        <div className="left">
-          <div className="card">
-            <div className="card-title">Mapa del recorrido</div>
+      <div className="page-padder">
+        <div className="card">
+          <div className="card-title">Mapa del recorrido</div>
 
-            <div style={{ marginBottom: 8 }}>
-              <label style={{ marginRight: 8 }}>Día:</label>
+          {/* CONTENEDOR DEL MAPA */}
+          <div className="map-wrap">
+            <div id="map" style={{ height: 560 }} />
+
+            {/* selector flotante (arriba-derecha) */}
+            <div className="map-overlay">
+              <label>Día:</label>
               <select
                 value={selectedDay}
                 onChange={(e) => onSelectDay(e.target.value)}
@@ -210,52 +218,61 @@ export default function App() {
               </select>
             </div>
 
-            <div id="map" style={{ height: 520, border: "1px solid #ccc" }} />
-
-            <div style={{ marginTop: 8 }}>
-              <strong>Distancia:</strong> {fmtMeters(dist)} &nbsp; | &nbsp;
-              <strong>Duración:</strong> {fmtMinutes(mins)} &nbsp; | &nbsp;
-              <strong>Puntos:</strong> {pointsCount}
+            {/* NUEVO: métricas flotantes (abajo-izquierda) */}
+            <div className="map-overlay bottom-left">
+              <span><strong>Distancia:</strong> {fmtMeters(dist)}</span>
+              <span className="sep">|</span>
+              <span><strong>Duración:</strong> {fmtMinutes(mins)}</span>
+              <span className="sep">|</span>
+              <span><strong>Puntos:</strong> {pointsCount}</span>
             </div>
-          </div>
-        </div>
 
-        <div className="right">
-          <div className="card">
-            <div className="card-title">
-              Lecturas recientes{" "}
-              <button onClick={onRefreshTable} style={{ marginLeft: 8 }}>
-                Refrescar tabla
-              </button>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Lat</th>
-                  <th>Lon</th>
-                  <th>Alt</th>
-                  <th>read_at</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={5}>Sin datos aún…</td>
-                  </tr>
-                ) : (
-                  rows.map((r) => (
-                    <tr key={r.id}>
-                      <td>{r.id}</td>
-                      <td>{r.lat}</td>
-                      <td>{r.lon}</td>
-                      <td>{r.alt_m ?? ""}</td>
-                      <td>{r.read_at ?? ""}</td>
+            {/* botón flecha para mostrar/ocultar drawer */}
+            <button
+              className={`drawer-toggle ${drawerOpen ? "open" : ""}`}
+              onClick={() => setDrawerOpen((v) => !v)}
+              aria-label="Abrir/Cerrar lecturas recientes"
+            >
+              {drawerOpen ? "❮" : "❯"}
+            </button>
+
+            {/* DRAWER LATERAL con tabla de lecturas */}
+            <aside className={`drawer ${drawerOpen ? "open" : ""}`}>
+              <div className="drawer-head">
+                <span>Lecturas registradas</span>
+                <button className="mini" onClick={onRefreshTable}>Refrescar</button>
+              </div>
+              <div className="drawer-body">
+                <table className="table-compact">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Lat</th>
+                      <th>Lon</th>
+                      <th>Alt</th>
+                      <th>read_at</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {rows.length === 0 ? (
+                      <tr>
+                        <td colSpan={5}>Sin datos aún…</td>
+                      </tr>
+                    ) : (
+                      rows.map((r) => (
+                        <tr key={r.id}>
+                          <td>{r.id}</td>
+                          <td>{r.lat}</td>
+                          <td>{r.lon}</td>
+                          <td>{r.alt_m ?? ""}</td>
+                          <td>{r.read_at ?? ""}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </aside>
           </div>
         </div>
       </div>
